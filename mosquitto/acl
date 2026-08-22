@@ -1,0 +1,9 @@
+# ACL rules for LowCostGNSS monitoring prototype
+
+# Worker account has full access to the sigap topic namespace
+user worker
+topic readwrite sigap/#
+
+# Station accounts can only publish to their specific topic paths
+pattern write sigap/%u/rinex
+pattern write sigap/%u/telemetry

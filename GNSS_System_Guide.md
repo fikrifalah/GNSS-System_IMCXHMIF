@@ -1,6 +1,3 @@
-# GNSS-System_IMCXHMIF
-system that tracks ground movement for landslide prevention
-
 # GNSS Deformation Monitoring System: Master Guide
 
 This document contains a comprehensive walkthrough of the LowCostGNSS ground deformation monitoring prototype, instructions for VPS deployment, and the ESP32 hardware integration guide.
@@ -353,4 +350,3 @@ void loop() {
   }
 }
 ```
-

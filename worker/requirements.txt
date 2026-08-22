@@ -1,0 +1,4 @@
+paho-mqtt>=1.6.1
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.6
+apscheduler>=3.10.0

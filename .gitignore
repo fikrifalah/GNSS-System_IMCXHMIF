@@ -1,0 +1,31 @@
+# --- Python Cache ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# --- Database & Storage (Crucial: do not upload uploaded RINEX files or database files) ---
+pgdata/
+*storage/rinex/
+*storage/
+api/storage/
+worker/storage/
+*.db
+*.sqlite3
+
+# --- Mosquitto Credentials & SSL Keys (Crucial: NEVER upload private keys!) ---
+mosquitto/certs/*.key
+mosquitto/certs/*.srl
+mosquitto/passwd
+
+# --- Environments & Secrets ---
+.env
+*.env
+.env.local
+
+# --- IDEs and OS files ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

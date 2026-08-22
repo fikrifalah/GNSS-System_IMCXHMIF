@@ -1,0 +1,105 @@
+
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gnss_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: gnss_db
+      POSTGRES_USER: gnss_user
+      POSTGRES_PASSWORD: gnss_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    mem_limit: 400m
+    networks:
+      - gnss_network
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: gnss_mosquitto
+    restart: always
+    user: "root"
+    volumes:
+      - ./mosquitto:/mosquitto/config
+    ports:
+      - "1883:1883"
+      - "8883:8883"
+    environment:
+      - OWNER=root
+    command: >
+      sh -c "
+        apk add --no-cache openssl &&
+        mkdir -p /mosquitto/config/certs &&
+        if [ ! -f /mosquitto/config/certs/ca.crt ]; then
+          echo 'Generating self-signed SSL certs...' &&
+          openssl req -new -x509 -days 365 -extensions v3_ca -keyout /mosquitto/config/certs/ca.key -out /mosquitto/config/certs/ca.crt -subj '/CN=MyLocalCA' -nodes &&
+          openssl genrsa -out /mosquitto/config/certs/server.key 2048 &&
+          openssl req -out /mosquitto/config/certs/server.csr -key /mosquitto/config/certs/server.key -new -subj '/CN=mosquitto' &&
+          openssl x509 -req -in /mosquitto/config/certs/server.csr -CA /mosquitto/config/certs/ca.crt -CAkey /mosquitto/config/certs/ca.key -CAcreateserial -out /mosquitto/config/certs/server.crt -days 365
+        fi &&
+        touch /mosquitto/config/passwd &&
+        mosquitto_passwd -b /mosquitto/config/passwd worker workerpass &&
+        mosquitto_passwd -b /mosquitto/config/passwd rover-01 rover01pass &&
+        mosquitto_passwd -b /mosquitto/config/passwd rover-02 rover02pass &&
+        mosquitto_passwd -b /mosquitto/config/passwd rover-03 rover03pass &&
+        mosquitto_passwd -b /mosquitto/config/passwd rover-04 rover04pass &&
+        mosquitto_passwd -b /mosquitto/config/passwd rover-05 rover05pass &&
+        /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
+      "
+    mem_limit: 100m
+    networks:
+      - gnss_network
+
+  api:
+    build:
+      context: ./api
+    container_name: gnss_api
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://gnss_user:gnss_password@postgres:5432/gnss_db
+      - API_KEY=my_super_secret_api_key_123
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./api:/app
+      - ./LowCostGNSS Pemantauan.html:/app/LowCostGNSS Pemantauan.html
+      - shared_storage:/app/storage
+    depends_on:
+      - postgres
+    mem_limit: 350m
+    networks:
+      - gnss_network
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: gnss_worker
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://gnss_user:gnss_password@postgres:5432/gnss_db
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - MQTT_USER=worker
+      - MQTT_PASSWORD=workerpass
+    volumes:
+      - ./worker:/app
+      - ./api:/api
+      - shared_storage:/app/storage
+    depends_on:
+      - postgres
+      - mosquitto
+    mem_limit: 350m
+    networks:
+      - gnss_network
+
+volumes:
+  pgdata:
+  shared_storage:
+
+networks:
+  gnss_network:
+    driver: bridge
