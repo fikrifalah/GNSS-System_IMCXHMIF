@@ -6,33 +6,52 @@ This document contains a comprehensive walkthrough of the LowCostGNSS ground def
 
 ## 1. System Walkthrough
 
-This prototype is a containerized, real-time pipeline that collects high-precision GNSS coordinates, calculates local ground displacement, and visualizes alerts on a dashboard.
+This prototype is a containerized, real-time pipeline that collects high-precision GNSS coordinates (via live telemetry or static session files), calculates local ground displacement, and visualizes alerts on a dashboard.
+
+### Data Ingestion Modes
+
+The system supports two distinct workflows for coordinate ingestion:
+1. **Real-time Live Telemetry**: Rovers publish periodic JSON coordinate packets directly over MQTT.
+2. **Static Session Post-Processing**: Rovers upload standard GNSS observation data (RINEX format) over MQTT at the end of a session for baseline post-processing.
 
 ### Data Flow Architecture
 
 ```mermaid
 graph TD
     ESP32[ESP32 Rover Station] -->|JSON Telemetry| MQTT[Mosquitto Broker]
+    ESP32 -->|RINEX Obs File| MQTT
     MQTT -->|MQTT Subscription| Worker[Worker Daemon]
-    Worker -->|ENU Conversion Math| DB[(PostgreSQL Database)]
+    Worker -->|ENU Conversion / RINEX Solver| DB[(PostgreSQL Database)]
     DB -->|SQL Queries| API[FastAPI Backend]
     API -->|REST API & /| Web[Web Browser Dashboard]
 ```
 
 ### Components Walkthrough
 
-1. **Hardware (ESP32 / ZED-F9P)**: The rover reads high-precision NMEA/UBX data from its GNSS module. Once it achieves a position fix, it builds a JSON payload and publishes it over MQTT.
-2. **MQTT Broker (Eclipse Mosquitto)**: Listens on port `1883` (unencrypted) and `8883` (TLS encrypted). It uses Access Control Lists (ACLs) to ensure a rover can only publish to its own topic (`sigap/<rover-id>/telemetry`).
-3. **Worker Daemon (Python)**: Subscribes to all telemetry. When a new reading arrives:
-   * It fetches the rover's **fixed reference coordinates** (baseline) from the database.
-   * It converts the coordinates to Earth-Centered Earth-Fixed (ECEF) XYZ, and computes the local **East-North-Up (ENU) displacement** relative to the baseline.
-   * It saves the position, updates the heartbeat, and evaluates safety rules.
-4. **Rule Engine**: Evaluates movement thresholds in millimeters:
-   * **Horizontal Displacement**: $\sqrt{\text{East}^2 + \text{North}^2}$
-   * **Movement Indicator**: $\max(\text{Horizontal}, |\text{Up}|)$
-   * **Alerts**: Triggers a `WASPADA` (20-50 mm) or `BAHAYA` (>= 50 mm) database alert.
-5. **FastAPI Backend**: Reads data from PostgreSQL and exposes REST endpoints (`/api/dashboard`, `/api/history`) and serves the static HTML dashboard `/` (`LowCostGNSS Pemantauan.html`).
-6. **Frontend Dashboard**: Queries the API every few seconds, displaying station connection status (ONLINE/OFFLINE), battery health, coordinate shifts, and active geohazard alerts on an interactive map.
+1. **Hardware (ESP32 / ZED-F9P)**: The rover reads high-precision NMEA/UBX data from its GNSS module.
+   * **Telemetry Mode**: Once a position fix is achieved, it builds a JSON payload and publishes it to `sigap/<rover-id>/telemetry`.
+   * **Static Mode**: Collects raw observations over a scheduled session, generating a RINEX observation file, and uploads the binary payload to `sigap/<rover-id>/rinex`.
+2. **MQTT Broker (Eclipse Mosquitto)**: Listens on port `1883` (unencrypted, internal container traffic) and `8883` (TLS encrypted, public hardware traffic). It uses Access Control Lists (ACLs) to restrict rovers:
+   * A client authenticated as `<rover-id>` can only publish to `sigap/<rover-id>/telemetry` and `sigap/<rover-id>/rinex`.
+3. **Worker Daemon (Python)**: Subscribes to the wildcard topic `sigap/+/telemetry` and `sigap/+/rinex`.
+   * **For JSON Telemetry**: Reads incoming coordinates, performs ECEF-to-ENU coordinate transformation relative to the baseline reference coordinates, saves the position, and evaluates geohazard rules.
+   * **For RINEX Files**: Saves binary data into `/app/storage/rinex/<rover-id>/`, parses approximate coordinates from the header (with RTK simulation fallback), calculates ENU displacement relative to the reference coordinates, logs the session, and triggers rules.
+4. **Rule Engine**: Evaluates geohazard, status, and health rules:
+   * **Data Quality Check**: Validates if data is reliable (`fix_type == "RTK_FIX"`, `hdop <= 1.0`, `satellites_active >= 10`). If not met, updates the status to `TIDAK_DAPAT_DINILAI` and triggers a `WASPADA` warning.
+   * **Movement Indicators**: Calculates local displacements in millimeters:
+     * Horizontal Displacement: $\sqrt{\text{East}^2 + \text{North}^2}$
+     * Movement Indicator: $\max(\text{Horizontal}, |\text{Up}|)$
+   * **Displacement Rules**: Evaluates the movement indicator if and only if data is reliable:
+     * $\ge 50$ mm: Triggers `BAHAYA` geohazard alert.
+     * $20 - 50$ mm: Triggers `WASPADA` geohazard alert.
+     * $< 20$ mm: Clears movement alerts (status `AMAN`).
+   * **Heartbeat Monitor**: Runs every 10 seconds. If no telemetry is received from an active rover within **60 seconds**, the rover status is changed to `OFFLINE` and a `WASPADA` communication alert is generated.
+   * **Battery Monitoring**: Evaluates device voltage:
+     * $< 10.8$ V: Triggers `BAHAYA` power alert.
+     * $10.8 - 11.5$ V: Triggers `WASPADA` power alert.
+     * $\ge 11.5$ V: Clears battery alerts.
+5. **FastAPI Backend**: Reads data from PostgreSQL, serving REST endpoints (`/api/dashboard`, `/api/history`) and delivering the dashboard UI via the root path `/`.
+6. **Frontend Dashboard**: Polls the backend API every **10 seconds**, automatically displaying rover status (connectivity, battery, GNSS quality, displacement trends) and managing real-time alarms.
 
 ---
 
@@ -349,4 +368,54 @@ void loop() {
     }
   }
 }
+```
+
+---
+
+## 4. Administrative API & Security
+
+The FastAPI backend exposes endpoints for administration and simulation. These endpoints are protected by API Key authentication.
+
+### Authentication Header
+* **Header Name**: `X-API-Key`
+* **Default Value**: `my_super_secret_api_key_123` (configurable via `API_KEY` environment variable in `docker-compose.yml`)
+
+### Administrative Endpoints
+
+| Method | Endpoint | Description | Headers Required |
+|:---:|---|---|:---:|
+| **`POST`** | `/api/stations` | Creates or updates a station baseline (latitude, longitude, reference height, map position coordinates). | `X-API-Key` |
+| **`POST`** | `/api/simulasi-alarm` | Manually triggers a simulated alarm (`WASPADA` or `BAHAYA`) for a specific rover. | `X-API-Key` |
+| **`POST`** | `/api/simulasi-clear` | Resolves and clears all active simulated alarms for a specific rover. | `X-API-Key` |
+
+---
+
+## 5. Testing and Validation Utilities
+
+### Single Telemetry Publishing Tool (`send_one.py`)
+
+For rapid testing and pipeline validation, you can use the `send_one.py` script located in the project root directory. This script uses Docker command-line execution to publish a mock telemetry message directly inside the Mosquitto container:
+
+```python
+import subprocess
+
+payload = '{"latitude":-6.789123411, "longitude":107.123456880, "altitude_m":1250.413, "battery_voltage":12.4, "satellites_active":16, "hdop":0.5, "fix_type":"RTK_FIX"}'
+
+subprocess.run([
+    'docker', 'exec', '-i', 'gnss_mosquitto', 
+    'mosquitto_pub', 
+    '-u', 'worker', 
+    '-P', 'workerpass', 
+    '-t', 'sigap/rover-01/telemetry', 
+    '-m', payload
+])
+print("Telemetry published successfully!")
+```
+
+### Manual Command-Line MQTT Publishing
+
+If you prefer testing directly in the terminal, run the following command to simulate a telemetry packet:
+
+```bash
+docker exec -i gnss_mosquitto mosquitto_pub -u worker -P workerpass -t sigap/rover-01/telemetry -m '{"latitude":-6.789123411, "longitude":107.123456880, "altitude_m":1250.413, "battery_voltage":12.4, "satellites_active":16, "hdop":0.5, "fix_type":"RTK_FIX"}'
 ```

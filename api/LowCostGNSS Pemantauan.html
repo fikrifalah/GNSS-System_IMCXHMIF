@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LowCostGNSS — Pemantauan Pergerakan Tanah</title>
+    <!-- Standard CDNs for Styling and Charting -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; }
+        .alert-scrollbar::-webkit-scrollbar { width: 4px; }
+        .alert-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .alert-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation Bar -->
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-30 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-indigo-900 text-white rounded-lg flex items-center justify-center font-bold text-sm shadow-md">LCG</div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight text-gray-900">LowCostGNSS</h1>
+                    <p class="text-xs text-gray-500 font-semibold tracking-wide uppercase">Sistem Deteksi Deformasi Tanah</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-3 text-sm">
+                <span class="bg-indigo-100 text-indigo-800 border border-indigo-200 px-3 py-1 rounded-full font-semibold">Mode Simulasi</span>
+                <span class="bg-emerald-100 text-emerald-800 border border-emerald-200 px-3 py-1 rounded-full font-semibold flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Online
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Dashboard Layout -->
+    <main class="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+
+        <!-- Column 1: Summary, Alarms, & Map -->
+        <div class="lg:col-span-1 space-y-6">
+            
+            <!-- Kondisi Lokasi Summary Card -->
+            <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Kondisi Lokasi</h2>
+                <div id="status-card" class="bg-green-50 border border-green-200 rounded-lg p-4 transition-all duration-300">
+                    <h3 class="text-green-800 font-bold text-2xl" id="overall-status">MEMUAT...</h3>
+                    <p class="text-sm text-green-700 mt-1" id="overall-desc">Menunggu data dari server.</p>
+                </div>
+                <div class="grid grid-cols-2 gap-3 mt-4">
+                    <div class="border border-gray-100 rounded-lg p-3 bg-gray-50">
+                        <p class="text-xs text-gray-500 font-medium">Jumlah Rover</p>
+                        <p class="text-2xl font-mono font-bold mt-1 text-gray-900" id="total-rover">0</p>
+                    </div>
+                    <div class="border border-gray-100 rounded-lg p-3 bg-gray-50">
+                        <p class="text-xs text-gray-500 font-medium">Peringatan Aktif</p>
+                        <p class="text-2xl font-mono font-bold mt-1 text-red-600" id="total-alarm">0</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Alerts Feed Card -->
+            <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                <h2 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4 flex justify-between items-center">
+                    <span>Peringatan Aktif</span>
+                    <span id="alert-count-badge" class="bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded-full font-mono">0</span>
+                </h2>
+                <div id="alert-feed" class="space-y-3 max-h-48 overflow-y-auto pr-1 alert-scrollbar">
+                    <p class="text-xs text-gray-400 italic text-center py-2">Tidak ada peringatan aktif saat ini.</p>
+                </div>
+            </div>
+
+            <!-- Relative Rover Map Card -->
+            <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                <h2 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Peta Posisi Rover (Relatif)</h2>
+                <div class="relative w-full h-48 bg-slate-950 rounded-lg overflow-hidden border border-slate-800" id="map-container">
+                    <div class="absolute inset-0 opacity-10" style="background-image: linear-gradient(to right, #4a5568 1px, transparent 1px), linear-gradient(to bottom, #4a5568 1px, transparent 1px); background-size: 20px 20px;"></div>
+                    <div class="absolute bottom-2 left-2 text-[9px] text-gray-500 font-mono">Peta Relatif (X, Y)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Column 2: Rover List -->
+        <div class="lg:col-span-1 space-y-6">
+            <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm h-full flex flex-col">
+                <h2 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Daftar Rover</h2>
+                <div id="rover-list" class="space-y-3 flex-grow overflow-y-auto max-h-[640px] pr-1 alert-scrollbar">
+                    <p class="text-sm text-gray-500 italic">Menghubungkan ke server...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Column 3-4: Detail View & Chart -->
+        <div class="lg:col-span-2 space-y-6">
+            <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm space-y-6">
+                
+                <!-- Detail Header -->
+                <div class="flex justify-between items-start border-b border-gray-100 pb-4">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-900" id="detail-title">Pilih Rover</h2>
+                        <p class="text-xs text-gray-500 mt-0.5 font-medium" id="detail-location">Lokasi: -</p>
+                    </div>
+                    <div class="text-right">
+                        <div class="flex items-center gap-1.5 text-xs text-gray-500 justify-end font-semibold">
+                            <span class="relative flex h-2.5 w-2.5">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                            </span>
+                            <span id="sync-status">Menerima data...</span>
+                        </div>
+                        <p class="text-[10px] text-gray-400 mt-1 font-mono font-bold" id="detail-ts">Last update: -</p>
+                    </div>
+                </div>
+
+                <!-- Displacements & Battery Grid -->
+                <div>
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Deformasi & Tegangan</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div class="border border-gray-100 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <p class="text-xs text-gray-500 font-semibold">Timur (X)</p>
+                            <p class="text-xl font-mono font-bold mt-1 text-slate-800" id="det-east">0.0 mm</p>
+                        </div>
+                        <div class="border border-gray-100 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <p class="text-xs text-gray-500 font-semibold">Utara (Y)</p>
+                            <p class="text-xl font-mono font-bold mt-1 text-slate-800" id="det-north">0.0 mm</p>
+                        </div>
+                        <div class="border border-gray-100 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <p class="text-xs text-gray-500 font-semibold">Vertikal (Z)</p>
+                            <p class="text-xl font-mono font-bold mt-1 text-slate-800" id="det-up">0.0 mm</p>
+                        </div>
+                        <div class="border border-gray-100 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <p class="text-xs text-gray-500 font-semibold">Baterai</p>
+                            <p class="text-xl font-mono font-bold mt-1 text-slate-800" id="det-bat">0.0 V</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GNSS Quality Grid -->
+                <div>
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Kualitas Sinyal GNSS</h3>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="border border-gray-100 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <p class="text-xs text-gray-500 font-semibold">Tipe Fix</p>
+                            <p class="text-lg font-mono font-bold mt-1 text-gray-900" id="det-fix">-</p>
+                        </div>
+                        <div class="border border-gray-100 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <p class="text-xs text-gray-500 font-semibold">Satelit Aktif</p>
+                            <p class="text-lg font-mono font-bold mt-1 text-slate-800" id="det-sats">0</p>
+                        </div>
+                        <div class="border border-gray-100 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <p class="text-xs text-gray-500 font-semibold">HDOP</p>
+                            <p class="text-lg font-mono font-bold mt-1 text-slate-800" id="det-hdop">0.0</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Absolute Coordinates Grid -->
+                <div>
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Koordinat Absolut</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="border border-gray-100 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <p class="text-xs text-gray-500 font-semibold">Latitude</p>
+                            <p class="text-sm font-mono font-bold mt-1 text-slate-800" id="det-lat">-6.00000000°</p>
+                        </div>
+                        <div class="border border-gray-100 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <p class="text-xs text-gray-500 font-semibold">Longitude</p>
+                            <p class="text-sm font-mono font-bold mt-1 text-slate-800" id="det-lon">107.00000000°</p>
+                        </div>
+                        <div class="border border-gray-100 rounded-lg p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <p class="text-xs text-gray-500 font-semibold">Tinggi WGS84</p>
+                            <p class="text-sm font-mono font-bold mt-1 text-slate-800" id="det-alt">0.000 m</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- History Chart -->
+                <div>
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Riwayat Pergerakan (24 Jam Terakhir)</h3>
+                    <div class="w-full h-72 border border-gray-200 rounded-lg p-4 bg-white shadow-inner">
+                        <canvas id="historyChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Application Logic -->
+    <script>
+        // 1. Core State
+        let rovers = [];
+        let chartInstance = null;
+        let selectedRoverId = null;
+        let serverTimeOffset = 0; // Clock offset between client and server
+
+        // 2. Helper: Dynamic API URL builder
+        function getApiUrl(endpoint) {
+            const baseUrl = window.location.protocol === 'file:' ? 'http://localhost:8000' : window.location.origin;
+            return `${baseUrl}${endpoint}`;
+        }
+
+        // 3. Helper: Format status colors
+        function getStatusColor(status) {
+            if(status === 'AMAN') return 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100/50';
+            if(status === 'WASPADA') return 'text-yellow-800 bg-yellow-50 border-yellow-200 hover:bg-yellow-100/50';
+            if(status === 'BAHAYA') return 'text-red-700 bg-red-50 border-red-200 hover:bg-red-100/50';
+            return 'text-slate-600 bg-slate-50 border-slate-200 hover:bg-slate-100/50';
+        }
+
+        // 4. Helper: Format displacement values dynamically (mm to m conversion)
+        function formatDisplacement(valMm) {
+            if (valMm === undefined || valMm === null) return '0.0 mm';
+            if (Math.abs(valMm) >= 1000) {
+                return (valMm / 1000).toFixed(3) + ' m';
+            }
+            return valMm.toFixed(1) + ' mm';
+        }
+
+        // 5. Helper: Synchronized relative time calculations
+        function getRelativeTime(epochMs) {
+            if (!epochMs) return 'Tidak ada data';
+            const nowOnServer = Date.now() + serverTimeOffset;
+            const seconds = Math.max(0, Math.floor((nowOnServer - epochMs) / 1000));
+            if (seconds < 10) return 'Baru saja';
+            if (seconds < 60) return `${seconds} detik lalu`;
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return `${minutes} menit lalu`;
+            const hours = Math.floor(minutes / 60);
+            return `${hours} jam lalu`;
+        }
+
+        // 6. Fetch main data from backend
+        async function fetchRoverData() {
+            const syncStatus = document.getElementById('sync-status');
+            syncStatus.innerText = "Memperbarui...";
+            
+            try {
+                const response = await fetch(getApiUrl('/api/dashboard')); 
+                if (!response.ok) throw new Error('Network response was not ok');
+                
+                const data = await response.json(); 
+                
+                // Track clock offset to handle client clock discrepancies
+                if (data.diambil_pada) {
+                    serverTimeOffset = data.diambil_pada - Date.now();
+                }
+                
+                // Map API response fields to Core State
+                rovers = data.rovers.map(r => ({
+                    id: r.deviceId,
+                    name: r.nama,
+                    location: r.lokasi,
+                    status: r.movement_status,
+                    east: r.east_mm,
+                    north: r.north_mm,
+                    up: r.up_mm,
+                    bat: r.battery_voltage,
+                    fix_type: r.fix_type,
+                    satellites_active: r.satellites_active,
+                    hdop: r.hdop,
+                    latitude: r.latitude,
+                    longitude: r.longitude,
+                    altitude_m: r.altitude_m,
+                    ts: r.ts,
+                    connectivity_status: r.connectivity_status,
+                    peta: r.peta
+                }));
+                
+                updateDashboard(data.alarms);
+                syncStatus.innerText = "Tersinkronisasi";
+
+            } catch (error) {
+                console.error('Failed to fetch from API. Loading mock fallback data...', error);
+                
+                // fallback offset
+                serverTimeOffset = 0;
+                
+                // --- FALLBACK MOCK DATA FOR TESTING ---
+                rovers = [
+                    { id: 'rover-01', name: 'Rover-01', location: 'Lereng Barat', status: 'AMAN', east: 1.2, north: -0.5, up: 0.1, bat: 12.2, fix_type: 'RTK_FIX', satellites_active: 16, hdop: 0.6, latitude: -6.789123456, longitude: 107.123456789, altitude_m: 1250.415, ts: Date.now(), connectivity_status: 'ONLINE', peta: { x: 0.27, y: 0.62 } },
+                    { id: 'rover-02', name: 'Rover-02', location: 'Lereng Timur', status: 'AMAN', east: 0.4, north: 0.2, up: 0.0, bat: 12.1, fix_type: 'RTK_FIX', satellites_active: 15, hdop: 0.7, latitude: -6.788412330, longitude: 107.126891004, altitude_m: 1243.882, ts: Date.now() - 30000, connectivity_status: 'ONLINE', peta: { x: 0.66, y: 0.34 } },
+                    { id: 'rover-03', name: 'Rover-03', location: 'Puncak Utara', status: 'WASPADA', east: 15.4, north: 2.1, up: -1.5, bat: 11.8, fix_type: 'RTK_FLOAT', satellites_active: 8, hdop: 1.5, latitude: -6.786901221, longitude: 107.124773100, altitude_m: 1261.204, ts: Date.now() - 120000, connectivity_status: 'ONLINE', peta: { x: 0.45, y: 0.16 } },
+                    { id: 'rover-04', name: 'Rover-04', location: 'Kaki Lereng', status: 'BAHAYA', east: 45.2, north: -12.4, up: -8.5, bat: 12.0, fix_type: 'RTK_FIX', satellites_active: 14, hdop: 0.8, latitude: -6.791004778, longitude: 107.125410990, altitude_m: 1218.760, ts: Date.now() - 4 * 3600000, connectivity_status: 'OFFLINE', peta: { x: 0.58, y: 0.79 } },
+                    { id: 'rover-05', name: 'Rover-05', location: 'Jalur Air', status: 'WASPADA', east: 18.0, north: 16.0, up: -4.1, bat: 12.0, fix_type: 'RTK_FIX', satellites_active: 12, hdop: 0.9, latitude: -6.790233145, longitude: 107.121880042, altitude_m: 1232.508, ts: Date.now() - 15000, connectivity_status: 'ONLINE', peta: { x: 0.14, y: 0.30 } }
+                ];
+                
+                // Mock active alerts corresponding to fallback states
+                const mockAlarms = [
+                    { id: "alm-02-gerak", severity: "BAHAYA", rover: "Rover-02", judul: "Pergerakan melewati ambang bahaya", deskripsi: "Indikator pergerakan 57.3 mm, di atas ambang batas 50 mm.", ts: Date.now() - 360000 },
+                    { id: "alm-03-kualitas", severity: "WASPADA", rover: "Rover-03", judul: "Kualitas data GNSS tidak memenuhi syarat", deskripsi: "Fix RTK_FLOAT, 7 satelit, HDOP 1.8. Status: Tidak dapat dinilai.", ts: Date.now() - 660000 }
+                ];
+                
+                updateDashboard(mockAlarms);
+                syncStatus.innerText = "Offline (Mock Data)";
+            }
+        }
+
+        // 7. Update dashboard layout and list elements
+        function updateDashboard(alarms = []) {
+            if (!rovers || rovers.length === 0) return;
+
+            // Update Summary Stats
+            const activeAlarms = rovers.filter(r => r.status === 'BAHAYA' || r.status === 'WASPADA');
+            document.getElementById('total-rover').innerText = rovers.length;
+            document.getElementById('total-alarm').innerText = activeAlarms.length;
+            
+            // Update Site Condition Status Card
+            const statusCard = document.getElementById('status-card');
+            const overallStatus = document.getElementById('overall-status');
+            const overallDesc = document.getElementById('overall-desc');
+            
+            if (rovers.some(r => r.status === 'BAHAYA')) {
+                statusCard.className = 'bg-red-50 border border-red-200 rounded-lg p-4 transition-all duration-300 shadow-sm';
+                overallStatus.className = 'text-red-800 font-bold text-2xl';
+                overallStatus.innerText = 'BAHAYA';
+                overallDesc.className = 'text-sm text-red-700 mt-1 font-semibold';
+                overallDesc.innerText = 'Terdapat rover di atas ambang batas deformasi bahaya.';
+            } else if (rovers.some(r => r.status === 'WASPADA')) {
+                statusCard.className = 'bg-yellow-50 border border-yellow-200 rounded-lg p-4 transition-all duration-300 shadow-sm';
+                overallStatus.className = 'text-yellow-800 font-bold text-2xl';
+                overallStatus.innerText = 'WASPADA';
+                overallDesc.className = 'text-sm text-yellow-700 mt-1 font-semibold';
+                overallDesc.innerText = 'Pergerakan abnormal terdeteksi di status Waspada.';
+            } else {
+                statusCard.className = 'bg-emerald-50 border border-emerald-200 rounded-lg p-4 transition-all duration-300 shadow-sm';
+                overallStatus.className = 'text-emerald-800 font-bold text-2xl';
+                overallStatus.innerText = 'AMAN';
+                overallDesc.className = 'text-sm text-emerald-700 mt-1 font-semibold';
+                overallDesc.innerText = 'Seluruh stasiun aktif berada di rentang normal.';
+            }
+
+            // Update Active Alarms Feed
+            updateAlertFeed(alarms);
+
+            // Update Relative Position Map Visualizer
+            updateMap();
+
+            // Rebuild Rover List Buttons
+            const list = document.getElementById('rover-list');
+            list.innerHTML = '';
+            
+            rovers.forEach(r => {
+                const btn = document.createElement('button');
+                const isSelected = selectedRoverId === r.id ? 'ring-2 ring-indigo-900 border-indigo-300 shadow-md scale-[1.01]' : 'shadow-sm';
+                const connDot = r.connectivity_status === 'ONLINE' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400';
+                
+                btn.className = `w-full text-left p-4 rounded-lg border hover:brightness-95 transition-all flex flex-col gap-2 ${getStatusColor(r.status)} ${isSelected}`;
+                btn.innerHTML = `
+                    <div class="flex justify-between items-center w-full">
+                        <span class="font-bold font-mono text-base text-slate-800">${r.name}</span>
+                        <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-white bg-opacity-60 border border-current shadow-sm">${r.status === 'TIDAK_DAPAT_DINILAI' ? 'OFFLINE / NO FIX' : r.status}</span>
+                    </div>
+                    <div class="flex justify-between items-center text-xs opacity-75 w-full">
+                        <div class="flex items-center gap-1.5 font-medium">
+                            <span class="w-2 h-2 rounded-full ${connDot}"></span>
+                            <span>${r.connectivity_status}</span>
+                        </div>
+                        <span class="font-mono text-[10px]">${getRelativeTime(r.ts)}</span>
+                    </div>
+                `;
+                
+                btn.onclick = () => selectRover(r);
+                list.appendChild(btn);
+            });
+
+            // Automatically select the first rover if none selected
+            if (!selectedRoverId) {
+                selectRover(rovers[0]);
+            } else {
+                // Background update silently updates the selected rover details
+                const currentRover = rovers.find(r => r.id === selectedRoverId);
+                if(currentRover) selectRover(currentRover, true); 
+            }
+        }
+
+        // 8. Update Active Alerts Feed Component
+        function updateAlertFeed(alarms = []) {
+            const feed = document.getElementById('alert-feed');
+            document.getElementById('alert-count-badge').innerText = alarms.length;
+            
+            if (!alarms || alarms.length === 0) {
+                feed.innerHTML = `<p class="text-xs text-gray-400 italic text-center py-4">Tidak ada peringatan aktif saat ini.</p>`;
+                return;
+            }
+            
+            feed.innerHTML = '';
+            alarms.forEach(a => {
+                const item = document.createElement('div');
+                let severityColor = 'border-slate-200 bg-slate-50 text-slate-800';
+                let severityDot = 'bg-slate-400';
+                if (a.severity === 'BAHAYA') {
+                    severityColor = 'border-red-200 bg-red-50/70 text-red-900';
+                    severityDot = 'bg-red-500 animate-ping';
+                } else if (a.severity === 'WASPADA') {
+                    severityColor = 'border-yellow-200 bg-yellow-50/70 text-yellow-900';
+                    severityDot = 'bg-yellow-500';
+                }
+                
+                item.className = `p-3 rounded-lg border text-xs leading-relaxed transition-all shadow-sm ${severityColor}`;
+                item.innerHTML = `
+                    <div class="flex items-center gap-1.5 font-bold mb-1">
+                        <span class="relative flex h-2 w-2">
+                            <span class="relative inline-flex rounded-full h-2 w-2 ${severityDot}"></span>
+                        </span>
+                        <span>${a.rover} - ${a.judul}</span>
+                    </div>
+                    <p class="text-[11px] text-slate-600 font-medium">${a.deskripsi}</p>
+                    <div class="text-[9px] text-gray-400 mt-1 font-mono">${getRelativeTime(a.ts)}</div>
+                `;
+                feed.appendChild(item);
+            });
+        }
+
+        // 9. Update Relative Positional Map
+        function updateMap() {
+            const container = document.getElementById('map-container');
+            container.innerHTML = `
+                <div class="absolute inset-0 opacity-10" style="background-image: linear-gradient(to right, #4a5568 1px, transparent 1px), linear-gradient(to bottom, #4a5568 1px, transparent 1px); background-size: 20px 20px;"></div>
+                <div class="absolute bottom-2 left-2 text-[9px] text-gray-500 font-mono">Peta Relatif (X, Y)</div>
+            `;
+            
+            rovers.forEach(r => {
+                if (!r.peta) return;
+                const dot = document.createElement('div');
+                dot.className = 'absolute group cursor-pointer';
+                const xPercent = (r.peta.x * 100).toFixed(1) + '%';
+                const yPercent = (r.peta.y * 100).toFixed(1) + '%';
+                dot.style.left = xPercent;
+                dot.style.top = yPercent;
+                dot.style.transform = 'translate(-50%, -50%)';
+                
+                let colorClass = 'bg-slate-400 shadow-slate-400';
+                if (r.connectivity_status === 'ONLINE') {
+                    if (r.status === 'AMAN') colorClass = 'bg-emerald-500 shadow-emerald-500/80';
+                    else if (r.status === 'WASPADA') colorClass = 'bg-yellow-500 shadow-yellow-500/80';
+                    else if (r.status === 'BAHAYA') colorClass = 'bg-red-500 shadow-red-500/80';
+                }
+                
+                const activeRing = selectedRoverId === r.id ? 'ring-2 ring-white scale-125 z-20' : 'z-10';
+                
+                dot.innerHTML = `
+                    <div class="w-3 h-3 rounded-full ${colorClass} shadow-lg ${activeRing} transition-all duration-300 relative">
+                        ${r.connectivity_status === 'ONLINE' && r.status !== 'AMAN' ? `<span class="animate-ping absolute inline-flex h-full w-full rounded-full ${colorClass} opacity-75"></span>` : ''}
+                    </div>
+                    <div class="absolute hidden group-hover:block bg-slate-900 text-white text-[9px] rounded px-1.5 py-0.5 -mt-8 left-1/2 transform -translate-x-1/2 whitespace-nowrap z-50 shadow-md border border-slate-700 font-semibold font-mono">
+                        ${r.name}: ${r.status}
+                    </div>
+                `;
+                dot.onclick = () => {
+                    const rObj = rovers.find(x => x.id === r.id);
+                    if (rObj) selectRover(rObj);
+                };
+                container.appendChild(dot);
+            });
+        }
+
+        // 10. Selected Rover detail rendering
+        function selectRover(rover, isBackgroundUpdate = false) {
+            selectedRoverId = rover.id;
+            
+            document.getElementById('detail-title').innerText = rover.name;
+            document.getElementById('detail-location').innerText = 'Lokasi: ' + (rover.location || '-');
+            document.getElementById('detail-ts').innerText = 'Last telemetry: ' + (rover.ts ? new Date(rover.ts).toLocaleTimeString('id-ID') : '-');
+            
+            // Populate Displacements & Battery
+            document.getElementById('det-east').innerText = formatDisplacement(rover.east);
+            document.getElementById('det-north').innerText = formatDisplacement(rover.north);
+            document.getElementById('det-up').innerText = formatDisplacement(rover.up);
+            document.getElementById('det-bat').innerText = (rover.bat || 0.0).toFixed(1) + ' V';
+
+            // Populate GNSS Quality Metrics
+            const fixEl = document.getElementById('det-fix');
+            fixEl.innerText = rover.fix_type || 'NO_FIX';
+            if (rover.fix_type === 'RTK_FIX') {
+                fixEl.className = 'text-lg font-mono font-bold mt-1 text-emerald-600';
+            } else if (rover.fix_type === 'RTK_FLOAT') {
+                fixEl.className = 'text-lg font-mono font-bold mt-1 text-yellow-600';
+            } else {
+                fixEl.className = 'text-lg font-mono font-bold mt-1 text-red-500';
+            }
+
+            document.getElementById('det-sats').innerText = rover.satellites_active || 0;
+            document.getElementById('det-hdop').innerText = (rover.hdop || 0.0).toFixed(2);
+
+            // Populate Absolute Coordinates
+            document.getElementById('det-lat').innerText = (rover.latitude || 0.0).toFixed(8) + '°';
+            document.getElementById('det-lon').innerText = (rover.longitude || 0.0).toFixed(8) + '°';
+            document.getElementById('det-alt').innerText = (rover.altitude_m || 0.0).toFixed(3) + ' m';
+
+            // Update Chart
+            updateChart(rover, isBackgroundUpdate);
+            
+            // Re-render sidebar to apply active highlights only on explicit clicks
+            if(!isBackgroundUpdate) {
+                // Find and pass current alarms list from status
+                const activeCardText = document.getElementById('total-alarm').innerText;
+                // Just let the dashboard trigger complete redraw
+                // without fetching again
+            } 
+        }
+
+        // 11. Efficient history chart updater (preventing memory leaks & canvas collisions)
+        async function updateChart(rover, isBackgroundUpdate) {
+            const ctx = document.getElementById('historyChart').getContext('2d');
+            
+            let labels = [];
+            let dataEast = [];
+            let dataNorth = [];
+            let dataUp = [];
+            
+            try {
+                const response = await fetch(getApiUrl(`/api/history?deviceId=${rover.id}&rentang=24j`));
+                if (!response.ok) throw new Error('Failed to fetch history');
+                
+                const historyData = await response.json();
+                const points = historyData.titik || [];
+                
+                labels = points.map(pt => {
+                    const date = new Date(pt.ts);
+                    return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+                });
+                dataEast = points.map(pt => pt.east_mm);
+                dataNorth = points.map(pt => pt.north_mm);
+                dataUp = points.map(pt => pt.up_mm);
+                
+            } catch (error) {
+                console.warn('Could not load real history. Falling back to simulated history:', error);
+                
+                labels = Array.from({length: 24}, (_, i) => `-${24-i}j`);
+                dataEast = labels.map(() => (rover.east || 0) + (Math.random() * 2 - 1));
+                dataNorth = labels.map(() => (rover.north || 0) + (Math.random() * 2 - 1));
+                dataUp = labels.map(() => (rover.up || 0) + (Math.random() * 1 - 0.5));
+            }
+
+            // Reuse Chart.js instance if it exists to avoid Canvas-in-use crash exceptions
+            if (chartInstance) {
+                chartInstance.data.labels = labels;
+                chartInstance.data.datasets[0].data = dataEast;
+                chartInstance.data.datasets[1].data = dataNorth;
+                chartInstance.data.datasets[2].data = dataUp;
+                
+                // Do not animate background updates to prevent dashboard flickering
+                chartInstance.update(isBackgroundUpdate ? 'none' : undefined);
+            } else {
+                chartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            { label: 'Timur (mm)', data: dataEast, borderColor: '#2f5d9e', tension: 0.3, pointRadius: 2, fill: false },
+                            { label: 'Utara (mm)', data: dataNorth, borderColor: '#6b4fa0', tension: 0.3, pointRadius: 2, fill: false },
+                            { label: 'Vertikal (mm)', data: dataUp, borderColor: '#1d7a6c', tension: 0.3, pointRadius: 2, fill: false }
+                        ]
+                    },
+                    options: { 
+                        responsive: true, 
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        animation: isBackgroundUpdate ? false : undefined
+                    }
+                });
+            }
+        }
+
+        // 12. Bootstrap
+        fetchRoverData(); // First load
+        setInterval(fetchRoverData, 10000); // Polling every 10 seconds
+    </script>
+</body>
+</html>

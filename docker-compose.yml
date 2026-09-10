@@ -1,16 +1,12 @@
-
-
 services:
   postgres:
     image: postgres:16-alpine
     container_name: gnss_postgres
     restart: always
     environment:
-      POSTGRES_DB: gnss_db
-      POSTGRES_USER: gnss_user
-      POSTGRES_PASSWORD: gnss_password
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
     mem_limit: 400m
@@ -41,12 +37,12 @@ services:
           openssl x509 -req -in /mosquitto/config/certs/server.csr -CA /mosquitto/config/certs/ca.crt -CAkey /mosquitto/config/certs/ca.key -CAcreateserial -out /mosquitto/config/certs/server.crt -days 365
         fi &&
         touch /mosquitto/config/passwd &&
-        mosquitto_passwd -b /mosquitto/config/passwd worker workerpass &&
-        mosquitto_passwd -b /mosquitto/config/passwd rover-01 rover01pass &&
-        mosquitto_passwd -b /mosquitto/config/passwd rover-02 rover02pass &&
-        mosquitto_passwd -b /mosquitto/config/passwd rover-03 rover03pass &&
-        mosquitto_passwd -b /mosquitto/config/passwd rover-04 rover04pass &&
-        mosquitto_passwd -b /mosquitto/config/passwd rover-05 rover05pass &&
+        mosquitto_passwd -b /mosquitto/config/passwd ${MQTT_USER} ${MQTT_PASSWORD} &&
+        mosquitto_passwd -b /mosquitto/config/passwd rover-01 ${ROVER_01_PASS} &&
+        mosquitto_passwd -b /mosquitto/config/passwd rover-02 ${ROVER_02_PASS} &&
+        mosquitto_passwd -b /mosquitto/config/passwd rover-03 ${ROVER_03_PASS} &&
+        mosquitto_passwd -b /mosquitto/config/passwd rover-04 ${ROVER_04_PASS} &&
+        mosquitto_passwd -b /mosquitto/config/passwd rover-05 ${ROVER_05_PASS} &&
         /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
       "
     mem_limit: 100m
@@ -59,8 +55,8 @@ services:
     container_name: gnss_api
     restart: always
     environment:
-      - DATABASE_URL=postgresql://gnss_user:gnss_password@postgres:5432/gnss_db
-      - API_KEY=my_super_secret_api_key_123
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - API_KEY=${API_KEY}
     ports:
       - "8000:8000"
     volumes:
@@ -80,11 +76,11 @@ services:
     container_name: gnss_worker
     restart: always
     environment:
-      - DATABASE_URL=postgresql://gnss_user:gnss_password@postgres:5432/gnss_db
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - MQTT_HOST=mosquitto
       - MQTT_PORT=1883
-      - MQTT_USER=worker
-      - MQTT_PASSWORD=workerpass
+      - MQTT_USER=${MQTT_USER}
+      - MQTT_PASSWORD=${MQTT_PASSWORD}
     volumes:
       - ./worker:/app
       - ./api:/api
